@@ -1,4 +1,5 @@
 from collections import OrderedDict
+import types
 import string
 import torch
 import warnings
@@ -75,7 +76,7 @@ class ModuleList(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        modules (list, optional): a list of modules to add
+        modules (iterable, optional): an iterable of modules to add
 
     Example::
 
@@ -94,7 +95,10 @@ class ModuleList(Module):
     def __init__(self, modules=None):
         super(ModuleList, self).__init__()
         if modules is not None:
-            self += modules
+            if isinstance(modules, types.GeneratorType):
+                self += list(modules)
+            else:
+                self += modules
 
     def __getitem__(self, idx):
         if not (-len(self) <= idx < len(self)):
@@ -125,14 +129,15 @@ class ModuleList(Module):
         return self
 
     def extend(self, modules):
-        r"""Appends modules from a Python list at the end.
+        r"""Appends modules from a Python iterable at the end.
 
         Arguments:
-            modules (list): list of modules to append
+            modules (iterable): list of modules to append
         """
-        if not isinstance(modules, list):
+        if not isinstance(modules, (list, tuple, types.GeneratorType)):
             raise TypeError("ModuleList.extend should be called with a "
-                            "list, but got " + type(modules).__name__)
+                            "list, tuple or generator, but got " +
+                            type(modules).__name__)
         offset = len(self)
         for i, module in enumerate(modules):
             self.add_module(str(offset + i), module)
@@ -146,7 +151,7 @@ class ParameterList(Module):
     contains are properly registered, and will be visible by all Module methods.
 
     Arguments:
-        modules (list, optional): a list of :class:`~torch.nn.Parameter`` to add
+        modules (iterable, optional): an iterable of :class:`~torch.nn.Parameter`` to add
 
     Example::
 
@@ -196,15 +201,32 @@ class ParameterList(Module):
         return self
 
     def extend(self, parameters):
-        """Appends parameters from a Python list at the end.
+        """Appends parameters from a Python iterable at the end.
 
         Arguments:
-            parameters (list): list of parameters to append
+            parameters (iterable): iterable of parameters to append
         """
-        if not isinstance(parameters, list):
+        if not isinstance(parameters, (list, tuple, types.GeneratorType)):
             raise TypeError("ParameterList.extend should be called with a "
-                            "list, but got " + type(parameters).__name__)
+                            "list, tuple or generator, but got " +
+                            type(parameters).__name__)
         offset = len(self)
         for i, param in enumerate(parameters):
-            self.register_parameter(str(offset + i), param)
+            # check if this is a named parameter tuple
+            if isinstance(param, tuple):
+                self.register_parameter(param[0], param[1])
+            else:
+                self.register_parameter(str(offset + i), param)
         return self
+
+    def __repr__(self):
+        tmpstr = self.__class__.__name__ + '(\n'
+        for k, p in self._parameters.items():
+            size_str = 'x'.join(str(size) for size in p.size())
+            device_str = '' if not p.is_cuda else \
+                ' (GPU {})'.format(p.get_device())
+            parastr = '[Parameter ({}) of size {}{}]'.format(
+                torch.typename(p.data), size_str, device_str)
+            tmpstr = tmpstr + '  (' + k + '): ' + parastr + '\n'
+        tmpstr = tmpstr + ')'
+        return tmpstr
